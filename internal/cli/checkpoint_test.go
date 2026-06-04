@@ -171,6 +171,39 @@ func TestCheckpointRestoreDryRunDoesNotResolveLease(t *testing.T) {
 	}
 }
 
+// TestCheckpointRestoreDockerCommitDoesNotPointAtFork is the round-10 regression:
+// restoring a docker-commit checkpoint must not tell users to use `checkpoint
+// fork` (which lands separately) or call the image a "VM image"; it should point
+// at the create/verify/delete support this PR adds.
+func TestCheckpointRestoreDockerCommitDoesNotPointAtFork(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CRABBOX_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := checkpointRecord{ID: "chk_dc_restore", Kind: checkpointKindDockerCommit, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	record.Native.ImageID = "sha256:deadbeef"
+	if _, err := store.Create(record); err != nil {
+		t.Fatal(err)
+	}
+	app := App{Stdout: io.Discard, Stderr: io.Discard}
+	err = app.checkpointRestore(context.Background(), []string{record.ID, "--id", "cbx_x"})
+	if err == nil {
+		t.Fatal("expected restore of a docker-commit checkpoint to be unsupported")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "fork") {
+		t.Fatalf("docker-commit restore guidance must not point at fork, got %q", msg)
+	}
+	if strings.Contains(msg, "VM image") {
+		t.Fatalf("docker-commit image must not be called a VM image, got %q", msg)
+	}
+	if !strings.Contains(msg, "verify") || !strings.Contains(msg, "delete") {
+		t.Fatalf("docker-commit restore guidance should mention verify/delete, got %q", msg)
+	}
+}
+
 func TestCheckpointForkDryRunDoesNotAcquireLease(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("CRABBOX_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))

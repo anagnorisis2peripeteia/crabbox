@@ -651,6 +651,9 @@ func (a App) checkpointRestore(ctx context.Context, args []string) error {
 				fmt.Fprintf(a.Stdout, "checkpoint restored id=%s lease=%s snapshot=%s\n", record.ID, blank(server.Labels["lease"], server.CloudID), record.Native.ImageID)
 				return nil
 			}
+			if record.Kind == checkpointKindDockerCommit {
+				return exit(2, "checkpoint %s is a docker-commit image; restore is not supported for docker-commit checkpoints — verify or delete it with crabbox checkpoint verify/delete %s", record.ID, record.ID)
+			}
 			return exit(2, "checkpoint %s is a VM image; use crabbox checkpoint fork %s to create a lease from it", record.ID, record.ID)
 		}
 		return exit(2, "checkpoint %s has kind=%s; restore requires %s", record.ID, record.Kind, checkpointKindArchive)
