@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -152,6 +153,35 @@ func (d directParallelsCheckpointDriver) Create(ctx context.Context, req checkpo
 	}, nil
 }
 
+type directDockerCommitCheckpointDriver struct{}
+
+func (directDockerCommitCheckpointDriver) Create(ctx context.Context, req checkpointNativeCreateRequest) (CoordinatorImage, error) {
+	containerID := strings.TrimSpace(req.Server.CloudID)
+	if containerID == "" {
+		return CoordinatorImage{}, exit(2, "docker-commit checkpoint requires a running container")
+	}
+	name := req.Name
+	if name == "" {
+		name = defaultNativeImageName(req.LeaseID, req.RepoName)
+	}
+	imageName := "crabbox-checkpoint-" + safeCaptureName(name)
+	runtime := firstNonBlank(req.Cfg.LocalContainer.Runtime, "docker")
+	cmd := exec.CommandContext(ctx, runtime, "commit", containerID, imageName)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return CoordinatorImage{}, exit(7, "docker commit %s: %v: %s", containerID, err, trimFailureDetail(string(out)))
+	}
+	imageID := strings.TrimSpace(string(out))
+	return CoordinatorImage{
+		ID:       imageID,
+		Name:     imageName,
+		State:    "available",
+		Provider: "local-container",
+		Kind:     checkpointKindDockerCommit,
+		Direct:   true,
+	}, nil
+}
+
 func parallelsPowerOffState(state string) bool {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "poweroff", "powered off", "stopped":
@@ -169,8 +199,13 @@ func nativeCheckpointCreateDriver(cfg Config, server Server, target SSHTarget, s
 	if _, ok := directParallelsNativeCheckpointKind(cfg, server, target, strategy); ok {
 		return directParallelsCheckpointDriver{}, true
 	}
-	if kind, ok := directNativeCheckpointKind(cfg, server, target, strategy); ok && kind == checkpointKindAWSAMI {
-		return directAWSAMICheckpointDriver{}, true
+	if kind, ok := directNativeCheckpointKind(cfg, server, target, strategy); ok {
+		switch kind {
+		case checkpointKindAWSAMI:
+			return directAWSAMICheckpointDriver{}, true
+		case checkpointKindDockerCommit:
+			return directDockerCommitCheckpointDriver{}, true
+		}
 	}
 	if _, ok := nativeCheckpointKind(cfg, server, target, strategy); ok {
 		return coordinatorCheckpointDriver{}, true
@@ -397,6 +432,8 @@ func checkpointKindForProviderImage(image CoordinatorImage) string {
 		return checkpointKindAzureOS
 	case checkpointKindGCPDisk:
 		return checkpointKindGCPDisk
+	case checkpointKindDockerCommit:
+		return checkpointKindDockerCommit
 	}
 	switch image.Provider {
 	case "azure":
@@ -405,6 +442,8 @@ func checkpointKindForProviderImage(image CoordinatorImage) string {
 		return checkpointKindGCP
 	case "parallels":
 		return checkpointKindParallels
+	case "local-container":
+		return checkpointKindDockerCommit
 	default:
 		return checkpointKindAWSAMI
 	}
@@ -414,7 +453,7 @@ func checkpointStrategyForKind(kind string) string {
 	switch kind {
 	case checkpointKindAWSAMI, checkpointKindAzure, checkpointKindGCP:
 		return checkpointStrategyImage
-	case checkpointKindAWSEBS, checkpointKindAzureOS, checkpointKindGCPDisk, checkpointKindParallels:
+	case checkpointKindAWSEBS, checkpointKindAzureOS, checkpointKindGCPDisk, checkpointKindParallels, checkpointKindDockerCommit:
 		return checkpointStrategyDiskSnapshot
 	default:
 		return ""

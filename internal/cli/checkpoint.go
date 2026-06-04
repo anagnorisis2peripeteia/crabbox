@@ -29,7 +29,8 @@ const (
 	checkpointKindAzureOS   = "azure-os-disk-snapshot"
 	checkpointKindGCP       = "gcp-machine-image"
 	checkpointKindGCPDisk   = "gcp-disk-snapshot"
-	checkpointKindParallels = "parallels-snapshot"
+	checkpointKindParallels    = "parallels-snapshot"
+	checkpointKindDockerCommit = "docker-commit"
 
 	checkpointStrategyAuto         = "auto"
 	checkpointStrategyImage        = "image"
@@ -176,7 +177,7 @@ func (a App) checkpointCreate(ctx context.Context, args []string) (err error) {
 	}
 	createKind := checkpointCreateMode(*mode, *strategy, cfg, server, target, *recipeOnly)
 	switch createKind {
-	case checkpointKindRecipe, checkpointKindAWSAMI, checkpointKindAWSEBS, checkpointKindAzure, checkpointKindAzureOS, checkpointKindGCP, checkpointKindGCPDisk, checkpointKindParallels, checkpointKindArchive:
+	case checkpointKindRecipe, checkpointKindAWSAMI, checkpointKindAWSEBS, checkpointKindAzure, checkpointKindAzureOS, checkpointKindGCP, checkpointKindGCPDisk, checkpointKindParallels, checkpointKindDockerCommit, checkpointKindArchive:
 		record.Kind = createKind
 	default:
 		return exit(2, "checkpoint mode must be auto, native, or archive")
@@ -193,7 +194,7 @@ func (a App) checkpointCreate(ctx context.Context, args []string) (err error) {
 	}()
 	switch createKind {
 	case checkpointKindRecipe:
-	case checkpointKindAWSAMI, checkpointKindAWSEBS, checkpointKindAzure, checkpointKindAzureOS, checkpointKindGCP, checkpointKindGCPDisk, checkpointKindParallels:
+	case checkpointKindAWSAMI, checkpointKindAWSEBS, checkpointKindAzure, checkpointKindAzureOS, checkpointKindGCP, checkpointKindGCPDisk, checkpointKindParallels, checkpointKindDockerCommit:
 		image, err := a.createNativeCheckpoint(ctx, cfg, server, target, leaseID, record.Name, repo.Name, checkpointStrategyForKind(createKind), *noReboot, *wait, *waitTimeout)
 		if image.ID != "" {
 			applyNativeImageCheckpointRecord(&record, image, *noReboot)
@@ -968,6 +969,18 @@ func deleteCheckpoint(ctx context.Context, store checkpointStore, id string, loc
 	}
 	providerID := nativeCheckpointDeleteID(record)
 	if isNativeCheckpointKind(record.Kind) && providerID != "" && !localOnly {
+		if record.Kind == checkpointKindDockerCommit {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			target := firstNonBlank(record.Native.Name, providerID)
+			cmd := exec.CommandContext(ctx, dockerCommitRuntime(cfg), "rmi", target)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return exit(7, "docker rmi %s: %v: %s", target, err, trimFailureDetail(string(out)))
+			}
+			return store.Delete(id)
+		}
 		if record.Kind == checkpointKindParallels {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -1159,6 +1172,25 @@ func (a App) verifyCheckpointRecord(ctx context.Context, store checkpointStore, 
 		}
 		if cfg, ok := directAWSCheckpointConfig(record); ok {
 			return verifyDirectAWSCheckpoint(ctx, audit, cfg, providerID, record.Native.AccountID), nil
+		}
+		if record.Kind == checkpointKindDockerCommit {
+			cfg, err := loadConfig()
+			if err != nil {
+				audit.ProviderState = "unknown"
+				audit.NextAction = "check_config"
+				audit.Error = err.Error()
+				return audit, nil
+			}
+			target := firstNonBlank(record.Native.Name, providerID)
+			cmd := exec.CommandContext(ctx, dockerCommitRuntime(cfg), "image", "inspect", target)
+			if err := cmd.Run(); err != nil {
+				audit.ProviderState = "missing"
+				audit.NextAction = "delete_local"
+				return audit, nil
+			}
+			audit.ProviderState = "available"
+			audit.NextAction = "fork_or_delete"
+			return audit, nil
 		}
 		if record.Kind == checkpointKindParallels {
 			cfg, err := loadConfig()
@@ -1380,7 +1412,7 @@ func nativeCheckpointForkWorkdir(cfg Config, leaseID, repoName, override string)
 }
 
 func isNativeCheckpointKind(kind string) bool {
-	return kind == checkpointKindAWSAMI || kind == checkpointKindAWSEBS || kind == checkpointKindAzure || kind == checkpointKindAzureOS || kind == checkpointKindGCP || kind == checkpointKindGCPDisk || kind == checkpointKindParallels
+	return kind == checkpointKindAWSAMI || kind == checkpointKindAWSEBS || kind == checkpointKindAzure || kind == checkpointKindAzureOS || kind == checkpointKindGCP || kind == checkpointKindGCPDisk || kind == checkpointKindParallels || kind == checkpointKindDockerCommit
 }
 
 func checkpointProviderForKind(kind string) string {
@@ -1393,6 +1425,8 @@ func checkpointProviderForKind(kind string) string {
 		return "gcp"
 	case checkpointKindParallels:
 		return "parallels"
+	case checkpointKindDockerCommit:
+		return "local-container"
 	default:
 		return ""
 	}
@@ -1588,4 +1622,8 @@ func remoteRelocateNativeCheckpointWorkdirCommand(sourceWorkdir, targetWorkdir s
 		"  mv \"$src\" \"$dst\"\n" +
 		"fi"
 	return "bash -lc " + shellQuote(script)
+}
+
+func dockerCommitRuntime(cfg Config) string {
+	return firstNonBlank(cfg.LocalContainer.Runtime, "docker")
 }

@@ -194,6 +194,7 @@ const (
 	CheckpointKindGCP              = checkpointKindGCP
 	CheckpointKindGCPDisk          = checkpointKindGCPDisk
 	CheckpointKindParallels        = checkpointKindParallels
+	CheckpointKindDockerCommit     = checkpointKindDockerCommit
 	CheckpointStrategyImage        = checkpointStrategyImage
 	CheckpointStrategyDiskSnapshot = checkpointStrategyDiskSnapshot
 )

@@ -597,6 +597,29 @@ func TestCheckpointCreateModeParallelsRejectsImageStrategy(t *testing.T) {
 	}
 }
 
+func TestCheckpointCreateModeLocalContainerUsesDockerCommit(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Provider = "local-container"
+	server := Server{Provider: "local-container", CloudID: "abc123"}
+	target := SSHTarget{TargetOS: targetLinux}
+	if got := checkpointCreateMode("auto", "", cfg, server, target, false); got != checkpointKindDockerCommit {
+		t.Fatalf("auto mode=%q, want %q", got, checkpointKindDockerCommit)
+	}
+	if got := checkpointCreateMode("native", "", cfg, server, target, false); got != checkpointKindDockerCommit {
+		t.Fatalf("native mode=%q, want %q", got, checkpointKindDockerCommit)
+	}
+}
+
+func TestCheckpointCreateModeLocalContainerRequiresCloudID(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Provider = "local-container"
+	server := Server{Provider: "local-container"}
+	target := SSHTarget{TargetOS: targetLinux}
+	if got := checkpointCreateMode("auto", "", cfg, server, target, false); got != checkpointKindArchive {
+		t.Fatalf("no cloud ID auto mode=%q, want %q", got, checkpointKindArchive)
+	}
+}
+
 func TestDirectAWSCheckpointConfigUsesDirectMarker(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "crabbox.yaml")
 	if err := os.WriteFile(cfgPath, []byte("provider: aws\naws:\n  region: us-east-1\n"), 0o600); err != nil {
