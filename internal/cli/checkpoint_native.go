@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -166,21 +165,12 @@ func (directDockerCommitCheckpointDriver) Create(ctx context.Context, req checkp
 		name = defaultNativeImageName(req.LeaseID, req.RepoName)
 	}
 	runtime := firstNonBlank(req.Cfg.LocalContainer.Runtime, "docker")
-	// When DOCKER_HOST pins the daemon, scrub any ambient DOCKER_CONTEXT for the
-	// create commands too, so the image is committed to exactly the daemon scope
-	// recorded for verify/delete/fork (the recorded host) rather than a daemon a
-	// stray context might select.
-	host := strings.TrimSpace(os.Getenv("DOCKER_HOST"))
-	dockerCmd := func(args ...string) *exec.Cmd {
-		cmd := exec.CommandContext(ctx, runtime, args...)
-		if host != "" {
-			cmd.Env = dockerEnvWithPinnedHost(host)
-		}
-		return cmd
-	}
+	// Commit using the ambient Docker selection so the image is created on the same
+	// daemon the lease was provisioned against; the effective scope is recorded
+	// separately for verify/delete/fork.
 	// Commit untagged first: the image digest is the immutable per-checkpoint
 	// identity recorded for verify/delete/fork.
-	out, err := dockerCmd("commit", containerID).CombinedOutput()
+	out, err := exec.CommandContext(ctx, runtime, "commit", containerID).CombinedOutput()
 	if err != nil {
 		return CoordinatorImage{}, exit(7, "docker commit %s: %v: %s", containerID, err, trimFailureDetail(string(out)))
 	}
@@ -192,7 +182,7 @@ func (directDockerCommitCheckpointDriver) Create(ctx context.Context, req checkp
 		shortID = shortID[:12]
 	}
 	imageName := "crabbox-checkpoint-" + safeCaptureName(name) + "-" + shortID
-	if tagOut, err := dockerCmd("tag", imageID, imageName).CombinedOutput(); err != nil {
+	if tagOut, err := exec.CommandContext(ctx, runtime, "tag", imageID, imageName).CombinedOutput(); err != nil {
 		return CoordinatorImage{}, exit(7, "docker tag %s: %v: %s", imageID, err, trimFailureDetail(string(tagOut)))
 	}
 	return CoordinatorImage{

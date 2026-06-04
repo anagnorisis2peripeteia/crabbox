@@ -1663,48 +1663,33 @@ func dockerCommitContext(ctx context.Context, cfg Config) string {
 }
 
 // dockerCommitEffectiveScope returns the single effective Docker daemon scope to
-// record for a docker-commit checkpoint. DOCKER_HOST takes precedence over
-// DOCKER_CONTEXT in the Docker CLI, so when a host is pinned that host alone is
-// the effective scope and no context is recorded; otherwise the active Docker
-// context is recorded. Returning only one prevents an ambiguous host+context pair
-// that could let create, verify, delete, and fork resolve to different daemons.
+// record for a docker-commit checkpoint, preserving the Docker CLI's context
+// precedence: when a named Docker context is active it is the effective scope and
+// no host is recorded; only when no context applies is the ambient DOCKER_HOST
+// endpoint recorded. Recording just one value lets verify/delete/fork reproduce
+// the same ambient selection on replay without overriding it.
 func dockerCommitEffectiveScope(ctx context.Context, cfg Config) (host, contextName string) {
-	if h := strings.TrimSpace(os.Getenv("DOCKER_HOST")); h != "" {
-		return h, ""
+	if c := dockerCommitContext(ctx, cfg); c != "" && c != "default" {
+		return "", c
 	}
-	return "", dockerCommitContext(ctx, cfg)
+	return strings.TrimSpace(os.Getenv("DOCKER_HOST")), ""
 }
 
-// dockerCommitCmd builds a docker-commit runtime command pinned to the daemon
-// scope recorded with the checkpoint (DOCKER_HOST, then docker context), so
-// verify/delete act on the same daemon the image was committed to even if the
-// ambient Docker context/host changed since create.
+// dockerCommitCmd builds a docker-commit runtime command targeting the daemon
+// scope recorded with the checkpoint, preserving Docker context precedence: a
+// recorded context is replayed via --context, otherwise a recorded DOCKER_HOST is
+// applied. The ambient environment is left intact so the command follows the same
+// Docker CLI selection rules the checkpoint was created under.
 func dockerCommitCmd(ctx context.Context, record checkpointRecord, cfg Config, args ...string) *exec.Cmd {
 	host := strings.TrimSpace(record.Native.DockerHost)
 	contextName := strings.TrimSpace(record.Native.DockerContext)
 	full := args
-	if host == "" && contextName != "" && contextName != "default" {
+	if contextName != "" && contextName != "default" {
 		full = append([]string{"--context", contextName}, args...)
 	}
 	cmd := exec.CommandContext(ctx, dockerCommitRecordRuntime(record, cfg), full...)
-	if host != "" {
-		cmd.Env = dockerEnvWithPinnedHost(host)
+	if contextName == "" && host != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+host)
 	}
 	return cmd
-}
-
-// dockerEnvWithPinnedHost returns the process environment with DOCKER_HOST set to
-// host and any ambient DOCKER_CONTEXT removed. A stray DOCKER_CONTEXT can win over
-// DOCKER_HOST when selecting the daemon, so clearing it guarantees the pinned host
-// is the daemon a docker-commit checkpoint is verified/deleted against.
-func dockerEnvWithPinnedHost(host string) []string {
-	base := os.Environ()
-	out := make([]string, 0, len(base)+1)
-	for _, e := range base {
-		if strings.HasPrefix(e, "DOCKER_CONTEXT=") {
-			continue
-		}
-		out = append(out, e)
-	}
-	return append(out, "DOCKER_HOST="+host)
 }

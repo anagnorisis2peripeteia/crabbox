@@ -662,58 +662,62 @@ func TestDockerCommitContextPrefersExplicitEnv(t *testing.T) {
 	}
 }
 
-// TestDockerCommitEffectiveScopePrefersHostOverContext covers the round-6 finding:
-// with both DOCKER_HOST and DOCKER_CONTEXT set, only the host (which the Docker CLI
-// honours) is recorded, so replay cannot resolve to a different daemon.
-func TestDockerCommitEffectiveScopePrefersHostOverContext(t *testing.T) {
+// TestDockerCommitEffectiveScopePrefersContextOverHost covers the round-7 finding:
+// the recorded scope must preserve Docker context precedence, so when a named
+// context is active it is recorded (not the host) even if DOCKER_HOST is also set.
+func TestDockerCommitEffectiveScopePrefersContextOverHost(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2376")
 	t.Setenv("DOCKER_CONTEXT", "ambient-ctx")
 	host, contextName := dockerCommitEffectiveScope(context.Background(), Config{})
-	if host != "tcp://10.0.0.5:2376" {
-		t.Fatalf("host=%q, want the pinned DOCKER_HOST", host)
+	if contextName != "ambient-ctx" {
+		t.Fatalf("contextName=%q, want ambient-ctx: an active context is the effective scope", contextName)
 	}
-	if contextName != "" {
-		t.Fatalf("contextName=%q, want empty: a pinned host is the sole effective scope", contextName)
+	if host != "" {
+		t.Fatalf("host=%q, want empty when a context is active (context takes precedence)", host)
 	}
 }
 
-// TestDockerCommitEffectiveScopeFallsBackToContext: with no host, the active
-// Docker context is the recorded scope.
-func TestDockerCommitEffectiveScopeFallsBackToContext(t *testing.T) {
-	t.Setenv("DOCKER_HOST", "")
-	t.Setenv("DOCKER_CONTEXT", "ctx-only")
+// TestDockerCommitEffectiveScopeFallsBackToHost: with no named context, the
+// ambient DOCKER_HOST endpoint is the recorded scope.
+func TestDockerCommitEffectiveScopeFallsBackToHost(t *testing.T) {
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2376")
 	host, contextName := dockerCommitEffectiveScope(context.Background(), Config{})
-	if host != "" || contextName != "ctx-only" {
-		t.Fatalf("got host=%q context=%q, want host empty + context ctx-only", host, contextName)
+	if host != "tcp://10.0.0.5:2376" || contextName != "" {
+		t.Fatalf("got host=%q context=%q, want host tcp://10.0.0.5:2376 + context empty", host, contextName)
 	}
 }
 
-// TestDockerCommitCmdHostOverridesAmbientContext is the regression for the
-// round-6 finding: when a checkpoint recorded a DOCKER_HOST, verify/delete must
-// pin that host and not let a stray ambient DOCKER_CONTEXT select another daemon.
-func TestDockerCommitCmdHostOverridesAmbientContext(t *testing.T) {
-	t.Setenv("DOCKER_CONTEXT", "ambient-ctx")
-	var rec checkpointRecord
-	rec.Native.DockerHost = "tcp://10.0.0.5:2376"
-	cmd := dockerCommitCmd(context.Background(), rec, Config{}, "image", "inspect", "img")
-	for _, e := range cmd.Env {
-		if strings.HasPrefix(e, "DOCKER_CONTEXT=") {
-			t.Fatalf("ambient DOCKER_CONTEXT must be cleared when pinning DOCKER_HOST, got %q in env", e)
+// TestDockerCommitCmdPrefersRecordedContext: a recorded context is replayed via
+// --context with no DOCKER_HOST override, preserving context precedence; a record
+// with only a host applies DOCKER_HOST and no --context.
+func TestDockerCommitCmdPrefersRecordedContext(t *testing.T) {
+	var ctxRec checkpointRecord
+	ctxRec.Native.DockerContext = "remote-ctx"
+	cmd := dockerCommitCmd(context.Background(), ctxRec, Config{}, "image", "inspect", "img")
+	if len(cmd.Args) < 3 || cmd.Args[1] != "--context" || cmd.Args[2] != "remote-ctx" {
+		t.Fatalf("recorded context must replay via --context, got args %v", cmd.Args)
+	}
+	if cmd.Env != nil {
+		t.Fatalf("recorded context must not set DOCKER_HOST, got env %v", cmd.Env)
+	}
+
+	var hostRec checkpointRecord
+	hostRec.Native.DockerHost = "tcp://10.0.0.5:2376"
+	cmd2 := dockerCommitCmd(context.Background(), hostRec, Config{}, "image", "inspect", "img")
+	for _, a := range cmd2.Args {
+		if a == "--context" {
+			t.Fatalf("host-only record must not add --context, got args %v", cmd2.Args)
 		}
 	}
 	found := false
-	for _, e := range cmd.Env {
+	for _, e := range cmd2.Env {
 		if e == "DOCKER_HOST=tcp://10.0.0.5:2376" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("recorded DOCKER_HOST not applied: %v", cmd.Env)
-	}
-	for _, a := range cmd.Args {
-		if a == "--context" {
-			t.Fatalf("pinned host must not add --context, got args %v", cmd.Args)
-		}
+		t.Fatalf("host-only record must apply DOCKER_HOST, got env %v", cmd2.Env)
 	}
 }
 
