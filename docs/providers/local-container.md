@@ -163,11 +163,12 @@ metadata updates.
   over SSH; it does not use the authenticated Crabbox portal.
 - No code-server and no Tailscale bootstrap.
 - Native checkpoints use `docker commit` (opt in with `--mode native`):
-  `crabbox checkpoint create/verify/delete` capture and remove the container
-  filesystem as a Docker image tagged `crabbox-checkpoint-<name>-<digest>`.
-  `auto` mode keeps the workspace-archive default. Each checkpoint records the
-  runtime/context (`docker`/`podman`/`nerdctl`) it was created with so
-  verify/delete target the same daemon.
+  `crabbox checkpoint create` captures the container filesystem as a Docker image
+  tagged `crabbox-checkpoint-<name>-<digest>`, `crabbox checkpoint inspect <id>
+  --verify` (or `checkpoint list --verify`) confirms it, and `crabbox checkpoint
+  delete <id>` removes it. `auto` mode keeps the workspace-archive default. Each
+  checkpoint records the runtime/context (`docker`/`podman`/`nerdctl`) it was
+  created with so verify and delete target the same daemon.
 - `warmup --actions-runner` is not supported. Use plain `crabbox run` for local
   container smoke tests, or a remote SSH provider for GitHub runner registration.
 - Docker socket pass-through is opt-in and grants the lease access to the host

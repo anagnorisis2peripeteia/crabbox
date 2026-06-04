@@ -83,10 +83,13 @@ directly without a coordinator.
 
 **`docker-commit`** — the `local-container` provider's native primitive (opt in
 with `--mode native`; `auto` keeps the workspace-archive default). `crabbox
-checkpoint create/verify/delete` capture and remove the container filesystem as a
-Docker image tagged `crabbox-checkpoint-<name>-<digest>`, using the immutable
-image digest as identity. The runtime/context used at create time
-(`docker`/`podman`/`nerdctl`) is recorded so verify/delete act on the same daemon.
+checkpoint create` captures the container filesystem as a Docker image tagged
+`crabbox-checkpoint-<name>-<digest>` (using the immutable image digest as
+identity); `crabbox checkpoint inspect <id> --verify` (or `checkpoint list
+--verify`) confirms the image is still present on its daemon; and `crabbox
+checkpoint delete <id>` removes it. The runtime/context used at create time
+(`docker`/`podman`/`nerdctl`) is recorded so verify and delete act on the same
+daemon.
 
 **Azure notes.** Disk-snapshot checkpoints require managed OS disks, the default
 for new Azure leases. Crabbox refuses native checkpoint creation from Azure
