@@ -54,20 +54,22 @@ type checkpointRecord struct {
 	ArchivePath    string `json:"archivePath,omitempty"`
 	ArchiveBytes   int64  `json:"archiveBytes,omitempty"`
 	Native         struct {
-		Provider    string   `json:"provider,omitempty"`
-		ImageID     string   `json:"imageId,omitempty"`
-		Kind        string   `json:"kind,omitempty"`
-		Name        string   `json:"name,omitempty"`
-		State       string   `json:"state,omitempty"`
-		Region      string   `json:"region,omitempty"`
-		AccountID   string   `json:"accountId,omitempty"`
-		Project     string   `json:"project,omitempty"`
-		Resource    string   `json:"resource,omitempty"`
-		SnapshotIDs []string `json:"snapshotIds,omitempty"`
-		Direct      bool     `json:"direct,omitempty"`
-		Strategy    string   `json:"strategy,omitempty"`
-		NoReboot    bool     `json:"noReboot,omitempty"`
-		Runtime     string   `json:"runtime,omitempty"`
+		Provider      string   `json:"provider,omitempty"`
+		ImageID       string   `json:"imageId,omitempty"`
+		Kind          string   `json:"kind,omitempty"`
+		Name          string   `json:"name,omitempty"`
+		State         string   `json:"state,omitempty"`
+		Region        string   `json:"region,omitempty"`
+		AccountID     string   `json:"accountId,omitempty"`
+		Project       string   `json:"project,omitempty"`
+		Resource      string   `json:"resource,omitempty"`
+		SnapshotIDs   []string `json:"snapshotIds,omitempty"`
+		Direct        bool     `json:"direct,omitempty"`
+		Strategy      string   `json:"strategy,omitempty"`
+		NoReboot      bool     `json:"noReboot,omitempty"`
+		Runtime       string   `json:"runtime,omitempty"`
+		DockerHost    string   `json:"dockerHost,omitempty"`
+		DockerContext string   `json:"dockerContext,omitempty"`
 	} `json:"native,omitempty"`
 	Repo struct {
 		Root      string `json:"root,omitempty"`
@@ -200,9 +202,12 @@ func (a App) checkpointCreate(ctx context.Context, args []string) (err error) {
 		if image.ID != "" {
 			applyNativeImageCheckpointRecord(&record, image, *noReboot)
 			if createKind == checkpointKindDockerCommit {
-				// Record the runtime/context used at create time so verify/delete
-				// act on the same daemon (docker/podman/nerdctl/context).
+				// Record the runtime + Docker daemon scope used at create time so
+				// verify/delete target the same daemon (runtime, context, DOCKER_HOST)
+				// even if the ambient Docker context changes later.
 				record.Native.Runtime = dockerCommitRuntime(cfg)
+				record.Native.DockerHost = strings.TrimSpace(os.Getenv("DOCKER_HOST"))
+				record.Native.DockerContext = strings.TrimSpace(server.Labels["runtime_context"])
 			}
 		}
 		if err != nil {
@@ -981,7 +986,7 @@ func deleteCheckpoint(ctx context.Context, store checkpointStore, id string, loc
 				return err
 			}
 			target := firstNonBlank(providerID, record.Native.Name)
-			cmd := exec.CommandContext(ctx, dockerCommitRecordRuntime(record, cfg), "rmi", "-f", target)
+			cmd := dockerCommitCmd(ctx, record, cfg, "rmi", "-f", target)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				return exit(7, "docker rmi %s: %v: %s", target, err, trimFailureDetail(string(out)))
 			}
@@ -1188,7 +1193,7 @@ func (a App) verifyCheckpointRecord(ctx context.Context, store checkpointStore, 
 				return audit, nil
 			}
 			target := firstNonBlank(providerID, record.Native.Name)
-			cmd := exec.CommandContext(ctx, dockerCommitRecordRuntime(record, cfg), "image", "inspect", target)
+			cmd := dockerCommitCmd(ctx, record, cfg, "image", "inspect", target)
 			if err := cmd.Run(); err != nil {
 				audit.ProviderState = "missing"
 				audit.NextAction = "delete_local"
@@ -1638,4 +1643,22 @@ func dockerCommitRuntime(cfg Config) string {
 // verify/delete target the same daemon the checkpoint was created against.
 func dockerCommitRecordRuntime(record checkpointRecord, cfg Config) string {
 	return firstNonBlank(record.Native.Runtime, dockerCommitRuntime(cfg))
+}
+
+// dockerCommitCmd builds a docker-commit runtime command pinned to the daemon
+// scope recorded with the checkpoint (DOCKER_HOST, then docker context), so
+// verify/delete act on the same daemon the image was committed to even if the
+// ambient Docker context/host changed since create.
+func dockerCommitCmd(ctx context.Context, record checkpointRecord, cfg Config, args ...string) *exec.Cmd {
+	host := strings.TrimSpace(record.Native.DockerHost)
+	contextName := strings.TrimSpace(record.Native.DockerContext)
+	full := args
+	if host == "" && contextName != "" && contextName != "default" {
+		full = append([]string{"--context", contextName}, args...)
+	}
+	cmd := exec.CommandContext(ctx, dockerCommitRecordRuntime(record, cfg), full...)
+	if host != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+host)
+	}
+	return cmd
 }

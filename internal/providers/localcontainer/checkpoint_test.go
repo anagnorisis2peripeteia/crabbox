@@ -39,3 +39,12 @@ func TestNativeCheckpointCapabilitySkipsDockerSocket(t *testing.T) {
 		t.Fatal("expected capability to be unsupported with docker-socket")
 	}
 }
+
+func TestNativeCheckpointCapabilitySkipsDockerSocketLabel(t *testing.T) {
+	_, ok := Provider{}.NativeCheckpointCapability(core.NativeCheckpointRequest{
+		Server: core.Server{CloudID: "abc123", Labels: map[string]string{"docker_socket": "1"}},
+	})
+	if ok {
+		t.Fatal("expected capability to be unsupported when the lease label marks docker-socket mode")
+	}
+}

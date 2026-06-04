@@ -633,6 +633,28 @@ func TestDockerCommitRecordRuntimePrefersRecordedRuntime(t *testing.T) {
 	}
 }
 
+func TestDockerCommitCmdPinsDaemonScope(t *testing.T) {
+	var rec checkpointRecord
+	rec.Native.DockerHost = "tcp://10.0.0.5:2376"
+	cmd := dockerCommitCmd(context.Background(), rec, Config{}, "image", "inspect", "img")
+	found := false
+	for _, e := range cmd.Env {
+		if e == "DOCKER_HOST=tcp://10.0.0.5:2376" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("recorded DOCKER_HOST not applied to command env: %v", cmd.Env)
+	}
+
+	var rec2 checkpointRecord
+	rec2.Native.DockerContext = "remote-ctx"
+	cmd2 := dockerCommitCmd(context.Background(), rec2, Config{}, "image", "inspect", "img")
+	if len(cmd2.Args) < 3 || cmd2.Args[1] != "--context" || cmd2.Args[2] != "remote-ctx" {
+		t.Fatalf("expected --context remote-ctx, got args %v", cmd2.Args)
+	}
+}
+
 func TestDirectAWSCheckpointConfigUsesDirectMarker(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "crabbox.yaml")
 	if err := os.WriteFile(cfgPath, []byte("provider: aws\naws:\n  region: us-east-1\n"), 0o600); err != nil {

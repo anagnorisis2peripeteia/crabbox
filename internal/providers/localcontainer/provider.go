@@ -51,10 +51,23 @@ func (Provider) NativeCheckpointCapability(req core.NativeCheckpointRequest) (co
 	if req.Server.CloudID == "" {
 		return core.NativeCheckpointCapability{}, false
 	}
-	if req.Config.LocalContainer.DockerSocket {
+	if req.Config.LocalContainer.DockerSocket || leaseHasDockerSocket(req.Server) {
 		return core.NativeCheckpointCapability{}, false
 	}
 	return core.NativeCheckpointCapability{Kind: core.CheckpointKindDockerCommit, Direct: true}, true
+}
+
+// leaseHasDockerSocket reports whether a resolved lease was created with
+// docker-socket mode (recorded on its labels). docker-commit checkpoints are
+// skipped for those leases because the host work-root mount masks the committed
+// workspace; the config flag alone misses leases whose mode is on the labels.
+func leaseHasDockerSocket(server core.Server) bool {
+	switch server.Labels["docker_socket"] {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p Provider) ConfigureDoctor(cfg core.Config, rt core.Runtime) (core.DoctorBackend, error) {
