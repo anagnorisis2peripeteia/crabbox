@@ -2,6 +2,7 @@ package localcontainer
 
 import (
 	"flag"
+	"strings"
 
 	core "github.com/openclaw/crabbox/internal/cli"
 )
@@ -24,7 +25,7 @@ func (Provider) Spec() core.ProviderSpec {
 		Family:      "container",
 		Kind:        core.ProviderKindSSHLease,
 		Targets:     []core.TargetSpec{{OS: core.TargetLinux}},
-		Features:    core.FeatureSet{core.FeatureSSH, core.FeatureCrabboxSync, core.FeatureCleanup, core.FeatureDesktop, core.FeatureBrowser, core.FeatureCacheVolume, core.FeatureCheckpoint},
+		Features:    core.FeatureSet{core.FeatureSSH, core.FeatureCrabboxSync, core.FeatureCleanup, core.FeatureDesktop, core.FeatureBrowser, core.FeatureCacheVolume, core.FeatureCheckpoint, core.FeatureFork},
 		Coordinator: core.CoordinatorNever,
 	}
 }
@@ -73,6 +74,36 @@ func leaseHasDockerSocket(server core.Server) bool {
 	default:
 		return false
 	}
+}
+
+// ApplyNativeCheckpointForkConfig points a new lease at a docker-commit
+// checkpoint image so `crabbox checkpoint fork` launches the box from the
+// committed image instead of the default base image.
+func (Provider) ApplyNativeCheckpointForkConfig(req core.NativeCheckpointForkRequest) error {
+	if req.Record.Kind != core.CheckpointKindDockerCommit {
+		return core.Exit(2, "provider=%s does not support checkpoint kind=%s", providerName, req.Record.Kind)
+	}
+	image := req.Record.Resource
+	if image == "" {
+		image = req.Record.ImageID
+	}
+	if image == "" {
+		return core.Exit(2, "local-container checkpoint fork requires a committed image reference")
+	}
+	req.Config.LocalContainer.Image = image
+	// docker-socket mode mounts a host work-root over the container work-root,
+	// which would mask the committed image's saved workspace; disable it for
+	// docker-commit forks so the checkpointed workspace is preserved.
+	req.Config.LocalContainer.DockerSocket = false
+	// Replay the daemon scope the checkpoint was created against so the fork
+	// launches on the daemon the committed image lives on, not whatever Docker
+	// context/host is ambient at fork time.
+	if rt := strings.TrimSpace(req.Record.Runtime); rt != "" {
+		req.Config.LocalContainer.Runtime = rt
+	}
+	req.Config.LocalContainer.DockerHost = strings.TrimSpace(req.Record.DockerHost)
+	req.Config.LocalContainer.DockerContext = strings.TrimSpace(req.Record.DockerContext)
+	return nil
 }
 
 func (p Provider) ConfigureDoctor(cfg core.Config, rt core.Runtime) (core.DoctorBackend, error) {

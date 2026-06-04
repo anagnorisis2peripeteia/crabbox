@@ -63,6 +63,89 @@ func testBackend(runner *recordingRunner) *backend {
 	return newBackend(Provider{}.Spec(), cfg, core.Runtime{Stdout: io.Discard, Stderr: io.Discard, Exec: runner}).(*backend)
 }
 
+func TestDockerPinsRecordedDaemonScope(t *testing.T) {
+	runner := &recordingRunner{}
+	b := testBackend(runner)
+	b.cfg.LocalContainer.DockerContext = "remote-ctx"
+	if _, err := b.docker(context.Background(), []string{"image", "inspect", "img"}, nil, nil); err != nil {
+		t.Fatalf("docker: %v", err)
+	}
+	got := recordedArgsForCommand(t, runner, "--context")
+	if !strings.Contains(got, "--context\nremote-ctx\nimage\ninspect") {
+		t.Fatalf("expected --context remote-ctx prepended, got:\n%s", got)
+	}
+
+	// A host-only record applies DOCKER_HOST, no --context, and scrubs any ambient
+	// DOCKER_CONTEXT (which would otherwise override DOCKER_HOST).
+	runner2 := &recordingRunner{}
+	b2 := testBackend(runner2)
+	t.Setenv("DOCKER_CONTEXT", "ambient-ctx")
+	b2.cfg.LocalContainer.DockerHost = "tcp://10.0.0.5:2376"
+	if _, err := b2.docker(context.Background(), []string{"image", "inspect", "img"}, nil, nil); err != nil {
+		t.Fatalf("docker: %v", err)
+	}
+	last := runner2.calls[len(runner2.calls)-1]
+	if len(last.Args) == 0 || last.Args[0] == "--context" {
+		t.Fatalf("a host-only record must not add --context, got args %v", last.Args)
+	}
+	found := false
+	for _, e := range last.Env {
+		if e == "DOCKER_HOST=tcp://10.0.0.5:2376" {
+			found = true
+		}
+		if strings.HasPrefix(e, "DOCKER_CONTEXT=") {
+			t.Fatalf("host-only replay must scrub ambient DOCKER_CONTEXT, got %q", e)
+		}
+	}
+	if !found {
+		t.Fatalf("recorded DOCKER_HOST not applied to docker command env: %v", last.Env)
+	}
+
+	// Context takes precedence: when both are set, --context is used and no
+	// DOCKER_HOST is applied.
+	runner3 := &recordingRunner{}
+	b3 := testBackend(runner3)
+	b3.cfg.LocalContainer.DockerContext = "remote-ctx"
+	b3.cfg.LocalContainer.DockerHost = "tcp://10.0.0.5:2376"
+	if _, err := b3.docker(context.Background(), []string{"version"}, nil, nil); err != nil {
+		t.Fatalf("docker: %v", err)
+	}
+	last3 := runner3.calls[len(runner3.calls)-1]
+	if len(last3.Args) == 0 || last3.Args[0] != "--context" || last3.Args[1] != "remote-ctx" {
+		t.Fatalf("context must take precedence via --context, got args %v", last3.Args)
+	}
+	if last3.Env != nil {
+		t.Fatalf("a recorded context must not also set DOCKER_HOST, got env %v", last3.Env)
+	}
+
+	// A recorded "default" context is pinned via --context default too.
+	runner4 := &recordingRunner{}
+	b4 := testBackend(runner4)
+	b4.cfg.LocalContainer.DockerContext = "default"
+	if _, err := b4.docker(context.Background(), []string{"version"}, nil, nil); err != nil {
+		t.Fatalf("docker: %v", err)
+	}
+	last4 := runner4.calls[len(runner4.calls)-1]
+	if len(last4.Args) == 0 || last4.Args[0] != "--context" || last4.Args[1] != "default" {
+		t.Fatalf("a recorded default context must pin via --context default, got args %v", last4.Args)
+	}
+}
+
+func TestDockerWithoutScopeInheritsAmbientEnv(t *testing.T) {
+	runner := &recordingRunner{}
+	b := testBackend(runner)
+	if _, err := b.docker(context.Background(), []string{"version"}, nil, nil); err != nil {
+		t.Fatalf("docker: %v", err)
+	}
+	last := runner.calls[len(runner.calls)-1]
+	if last.Env != nil {
+		t.Fatalf("unpinned lease must leave Env nil so the ambient daemon is used, got %v", last.Env)
+	}
+	if len(last.Args) == 0 || last.Args[0] == "--context" {
+		t.Fatalf("unpinned lease must not inject --context, got args %v", last.Args)
+	}
+}
+
 func TestProviderAliases(t *testing.T) {
 	for _, name := range []string{"local-container", "docker", "container", "local-docker"} {
 		provider, err := core.ProviderFor(name)

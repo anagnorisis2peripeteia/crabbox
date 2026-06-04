@@ -554,16 +554,19 @@ func nativeCoordinatorImageRef(record checkpointRecord) CoordinatorImageRef {
 
 func nativeCheckpointForkRecord(record checkpointRecord) NativeCheckpointForkRecord {
 	return NativeCheckpointForkRecord{
-		Kind:        record.Kind,
-		ImageID:     record.Native.ImageID,
-		Resource:    record.Native.Resource,
-		Region:      record.Native.Region,
-		Project:     record.Native.Project,
-		Direct:      record.Native.Direct,
-		HostID:      record.HostID,
-		TargetOS:    record.TargetOS,
-		WindowsMode: record.WindowsMode,
-		ServerType:  record.ServerType,
+		Kind:          record.Kind,
+		ImageID:       record.Native.ImageID,
+		Resource:      record.Native.Resource,
+		Region:        record.Native.Region,
+		Project:       record.Native.Project,
+		Direct:        record.Native.Direct,
+		HostID:        record.HostID,
+		TargetOS:      record.TargetOS,
+		WindowsMode:   record.WindowsMode,
+		ServerType:    record.ServerType,
+		Runtime:       record.Native.Runtime,
+		DockerHost:    record.Native.DockerHost,
+		DockerContext: record.Native.DockerContext,
 	}
 }
 

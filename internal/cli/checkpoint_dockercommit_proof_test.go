@@ -69,7 +69,15 @@ func TestDockerCommitCheckpointLifecycleProof(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify (image inspect): %v: %s", err, insp)
 	}
-	t.Logf("VERIFY: image present (next_action would be delete_local), id=%s", short(strings.TrimSpace(string(insp))))
+	t.Logf("VERIFY: image present (next_action -> fork_or_delete_local), id=%s", short(strings.TrimSpace(string(insp))))
+
+	// FORK — the committed image boots as a fresh container; this is what
+	// ApplyNativeCheckpointForkConfig points a new lease at (cfg.LocalContainer.Image).
+	forkOut, err := exec.Command(runtime, "run", "--rm", img.Name, "echo", "forked-from-checkpoint").CombinedOutput()
+	if err != nil {
+		t.Fatalf("fork (docker run %s): %v: %s", img.Name, err, forkOut)
+	}
+	t.Logf("FORK: booted container from checkpoint image -> %s", lastLine(string(forkOut)))
 
 	// DELETE — docker rmi.
 	rmiOut, err := exec.Command(runtime, "rmi", img.Name).CombinedOutput()

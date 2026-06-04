@@ -169,6 +169,11 @@ metadata updates.
   delete <id>` removes it. `auto` mode keeps the workspace-archive default. Each
   checkpoint records the runtime/context (`docker`/`podman`/`nerdctl`) it was
   created with so verify and delete target the same daemon.
+- `crabbox checkpoint fork` launches a new lease from a docker-commit checkpoint
+  image instead of the base image, replaying the checkpoint's recorded runtime
+  and daemon scope (`DOCKER_HOST` / Docker context) so the fork runs on the same
+  daemon the committed image lives on. docker-socket mode is disabled for the
+  fork so the host work-root mount cannot mask the committed workspace.
 - `warmup --actions-runner` is not supported. Use plain `crabbox run` for local
   container smoke tests, or a remote SSH provider for GitHub runner registration.
 - Docker socket pass-through is opt-in and grants the lease access to the host

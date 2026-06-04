@@ -420,6 +420,12 @@ type LocalContainerConfig struct {
 	Memory       string
 	Network      string
 	DockerSocket bool
+	// DockerHost and DockerContext pin the Docker daemon scope for this lease's
+	// runtime commands. They are normally empty (commands use the ambient
+	// DOCKER_HOST / Docker context); a docker-commit checkpoint fork sets them so
+	// the new lease targets the daemon the committed image lives on.
+	DockerHost    string
+	DockerContext string
 }
 
 type AppleContainerConfig struct {

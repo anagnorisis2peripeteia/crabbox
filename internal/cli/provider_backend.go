@@ -104,6 +104,13 @@ type NativeCheckpointForkRecord struct {
 	TargetOS    string
 	WindowsMode string
 	ServerType  string
+	// Runtime, DockerHost, and DockerContext carry the daemon scope a
+	// docker-commit checkpoint was created against so a fork can launch the new
+	// lease on the same daemon the committed image lives on, instead of whatever
+	// Docker context is ambient at fork time.
+	Runtime       string
+	DockerHost    string
+	DockerContext string
 }
 
 type NativeCheckpointForkRequest struct {

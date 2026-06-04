@@ -1212,7 +1212,7 @@ func (a App) verifyCheckpointRecord(ctx context.Context, store checkpointStore, 
 				return audit, nil
 			}
 			audit.ProviderState = "available"
-			audit.NextAction = "delete_local"
+			audit.NextAction = "fork_or_delete_local"
 			return audit, nil
 		}
 		if record.Kind == checkpointKindParallels {

@@ -794,9 +794,30 @@ func localContainerClaimExpired(claim core.LeaseClaim, now time.Time) bool {
 
 func (b *backend) docker(ctx context.Context, args []string, stdout, stderr io.Writer) (core.LocalCommandResult, error) {
 	cfg := b.configForRun()
+	var env []string
+	host := strings.TrimSpace(cfg.LocalContainer.DockerHost)
+	contextName := strings.TrimSpace(cfg.LocalContainer.DockerContext)
+	// Preserve Docker context precedence: any recorded context — including the
+	// explicit "default" — is replayed via --context so a context selected after
+	// the fork cannot hijack the daemon. A host-only scope pins the recorded
+	// DOCKER_HOST and scrubs any ambient DOCKER_CONTEXT, which the Docker CLI
+	// documents as overriding DOCKER_HOST.
+	if contextName != "" {
+		args = append([]string{"--context", contextName}, args...)
+	} else if host != "" {
+		env = make([]string, 0, len(os.Environ())+1)
+		for _, e := range os.Environ() {
+			if strings.HasPrefix(e, "DOCKER_CONTEXT=") {
+				continue
+			}
+			env = append(env, e)
+		}
+		env = append(env, "DOCKER_HOST="+host)
+	}
 	return b.rt.Exec.Run(ctx, core.LocalCommandRequest{
 		Name:   cfg.LocalContainer.Runtime,
 		Args:   args,
+		Env:    env,
 		Stdout: stdout,
 		Stderr: stderr,
 	})
