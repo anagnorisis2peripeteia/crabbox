@@ -688,6 +688,34 @@ func TestDockerCommitEffectiveScopeFallsBackToHost(t *testing.T) {
 	}
 }
 
+// TestDockerCommitEffectiveScopeRecordsDefaultContext is the round-9 regression:
+// a checkpoint created on the default Docker context with no DOCKER_HOST must
+// still record a scope (the active context, "default") so a context selected
+// later cannot hijack verify/delete.
+func TestDockerCommitEffectiveScopeRecordsDefaultContext(t *testing.T) {
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("DOCKER_HOST", "")
+	host, contextName := dockerCommitEffectiveScope(context.Background(), Config{})
+	if host != "" {
+		t.Fatalf("host=%q, want empty on the default context", host)
+	}
+	if contextName != "default" {
+		t.Fatalf("contextName=%q, want the active context recorded (default), not dropped", contextName)
+	}
+}
+
+// TestDockerCommitCmdReplaysDefaultContext: a recorded "default" context is pinned
+// via --context default so a later ambient DOCKER_CONTEXT cannot take over.
+func TestDockerCommitCmdReplaysDefaultContext(t *testing.T) {
+	t.Setenv("DOCKER_CONTEXT", "some-other-ctx")
+	var rec checkpointRecord
+	rec.Native.DockerContext = "default"
+	cmd := dockerCommitCmd(context.Background(), rec, Config{}, "image", "inspect", "img")
+	if len(cmd.Args) < 3 || cmd.Args[1] != "--context" || cmd.Args[2] != "default" {
+		t.Fatalf("recorded default context must replay via --context default, got args %v", cmd.Args)
+	}
+}
+
 // TestDockerCommitCmdPrefersRecordedContext: a recorded context is replayed via
 // --context with no DOCKER_HOST override, preserving context precedence; a record
 // with only a host applies DOCKER_HOST and no --context.

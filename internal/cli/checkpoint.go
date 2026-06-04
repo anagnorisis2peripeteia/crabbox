@@ -1663,30 +1663,34 @@ func dockerCommitContext(ctx context.Context, cfg Config) string {
 }
 
 // dockerCommitEffectiveScope returns the single effective Docker daemon scope to
-// record for a docker-commit checkpoint, preserving the Docker CLI's context
-// precedence: when a named Docker context is active it is the effective scope and
-// no host is recorded; only when no context applies is the ambient DOCKER_HOST
-// endpoint recorded. Recording just one value lets verify/delete/fork reproduce
-// the same ambient selection on replay without overriding it.
+// record for a docker-commit checkpoint, preserving the Docker CLI's selection
+// precedence: an explicit DOCKER_CONTEXT wins, otherwise an explicit DOCKER_HOST
+// pins the daemon, otherwise the active Docker context — including the implicit
+// "default" context — is recorded so verify/delete/fork can pin the same daemon
+// even if a context is selected later. Recording just one value keeps replay
+// unambiguous.
 func dockerCommitEffectiveScope(ctx context.Context, cfg Config) (host, contextName string) {
-	if c := dockerCommitContext(ctx, cfg); c != "" && c != "default" {
+	if c := strings.TrimSpace(os.Getenv("DOCKER_CONTEXT")); c != "" {
 		return "", c
 	}
-	return strings.TrimSpace(os.Getenv("DOCKER_HOST")), ""
+	if h := strings.TrimSpace(os.Getenv("DOCKER_HOST")); h != "" {
+		return h, ""
+	}
+	return "", dockerCommitContext(ctx, cfg)
 }
 
 // dockerCommitCmd builds a docker-commit runtime command targeting the daemon
-// scope recorded with the checkpoint, preserving Docker context precedence: a
-// recorded context is replayed via --context. A host-only record (captured when
-// no context was active at create) instead pins the recorded DOCKER_HOST and
-// scrubs any later ambient DOCKER_CONTEXT, which the Docker CLI documents as
-// overriding DOCKER_HOST — so without scrubbing it a context set after create
-// could hijack a host-scoped checkpoint's verify/delete.
+// scope recorded with the checkpoint, preserving Docker context precedence: any
+// recorded context — including the explicit "default" — is replayed via --context
+// so a context selected after create cannot hijack the operation. A host-only
+// record (captured when no context applied at create) instead pins the recorded
+// DOCKER_HOST and scrubs any later ambient DOCKER_CONTEXT, which the Docker CLI
+// documents as overriding DOCKER_HOST.
 func dockerCommitCmd(ctx context.Context, record checkpointRecord, cfg Config, args ...string) *exec.Cmd {
 	host := strings.TrimSpace(record.Native.DockerHost)
 	contextName := strings.TrimSpace(record.Native.DockerContext)
 	full := args
-	if contextName != "" && contextName != "default" {
+	if contextName != "" {
 		full = append([]string{"--context", contextName}, args...)
 	}
 	cmd := exec.CommandContext(ctx, dockerCommitRecordRuntime(record, cfg), full...)
