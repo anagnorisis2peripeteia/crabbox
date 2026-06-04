@@ -1677,9 +1677,11 @@ func dockerCommitEffectiveScope(ctx context.Context, cfg Config) (host, contextN
 
 // dockerCommitCmd builds a docker-commit runtime command targeting the daemon
 // scope recorded with the checkpoint, preserving Docker context precedence: a
-// recorded context is replayed via --context, otherwise a recorded DOCKER_HOST is
-// applied. The ambient environment is left intact so the command follows the same
-// Docker CLI selection rules the checkpoint was created under.
+// recorded context is replayed via --context. A host-only record (captured when
+// no context was active at create) instead pins the recorded DOCKER_HOST and
+// scrubs any later ambient DOCKER_CONTEXT, which the Docker CLI documents as
+// overriding DOCKER_HOST — so without scrubbing it a context set after create
+// could hijack a host-scoped checkpoint's verify/delete.
 func dockerCommitCmd(ctx context.Context, record checkpointRecord, cfg Config, args ...string) *exec.Cmd {
 	host := strings.TrimSpace(record.Native.DockerHost)
 	contextName := strings.TrimSpace(record.Native.DockerContext)
@@ -1689,7 +1691,23 @@ func dockerCommitCmd(ctx context.Context, record checkpointRecord, cfg Config, a
 	}
 	cmd := exec.CommandContext(ctx, dockerCommitRecordRuntime(record, cfg), full...)
 	if contextName == "" && host != "" {
-		cmd.Env = append(os.Environ(), "DOCKER_HOST="+host)
+		cmd.Env = dockerEnvWithPinnedHost(host)
 	}
 	return cmd
+}
+
+// dockerEnvWithPinnedHost returns the process environment with DOCKER_HOST set to
+// host and any ambient DOCKER_CONTEXT removed. DOCKER_CONTEXT overrides DOCKER_HOST
+// in the Docker CLI, so for a host-scoped checkpoint the context must be scrubbed
+// to guarantee verify/delete act on the recorded host daemon.
+func dockerEnvWithPinnedHost(host string) []string {
+	base := os.Environ()
+	out := make([]string, 0, len(base)+1)
+	for _, e := range base {
+		if strings.HasPrefix(e, "DOCKER_CONTEXT=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, "DOCKER_HOST="+host)
 }

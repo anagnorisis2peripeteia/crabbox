@@ -721,6 +721,31 @@ func TestDockerCommitCmdPrefersRecordedContext(t *testing.T) {
 	}
 }
 
+// TestDockerCommitCmdHostOnlyScrubsAmbientContext is the round-8 regression: a
+// host-scoped checkpoint (no recorded context) must scrub any later ambient
+// DOCKER_CONTEXT on replay, since DOCKER_CONTEXT overrides DOCKER_HOST in the
+// Docker CLI and would otherwise hijack the recorded host daemon.
+func TestDockerCommitCmdHostOnlyScrubsAmbientContext(t *testing.T) {
+	t.Setenv("DOCKER_CONTEXT", "ambient-ctx")
+	var rec checkpointRecord
+	rec.Native.DockerHost = "tcp://10.0.0.5:2376"
+	cmd := dockerCommitCmd(context.Background(), rec, Config{}, "image", "inspect", "img")
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "DOCKER_CONTEXT=") {
+			t.Fatalf("ambient DOCKER_CONTEXT must be scrubbed for a host-only replay, got %q", e)
+		}
+	}
+	found := false
+	for _, e := range cmd.Env {
+		if e == "DOCKER_HOST=tcp://10.0.0.5:2376" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("recorded DOCKER_HOST not applied: %v", cmd.Env)
+	}
+}
+
 // TestDockerCommitDaemonScopeSurvivesAmbientChange is the regression for the
 // round-5 finding: a checkpoint created under one Docker context must verify and
 // delete against that same context even after the ambient DOCKER_CONTEXT changes.
