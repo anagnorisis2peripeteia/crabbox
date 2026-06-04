@@ -696,6 +696,40 @@ func TestDockerCommitContextPrefersExplicitEnv(t *testing.T) {
 	}
 }
 
+// TestDockerCommitEffectiveScopeSkipsContextForPodman covers the round-11 finding:
+// Docker context/host are Docker-specific, so a non-Docker runtime must record no
+// daemon scope even when DOCKER_CONTEXT is set in the environment.
+func TestDockerCommitEffectiveScopeSkipsContextForPodman(t *testing.T) {
+	t.Setenv("DOCKER_CONTEXT", "some-ctx")
+	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2376")
+	cfg := Config{}
+	cfg.LocalContainer.Runtime = "podman"
+	host, contextName := dockerCommitEffectiveScope(context.Background(), cfg)
+	if host != "" || contextName != "" {
+		t.Fatalf("podman runtime must record no Docker daemon scope, got host=%q context=%q", host, contextName)
+	}
+}
+
+// TestDockerCommitCmdSkipsContextForPodman: a record made under podman must never
+// replay `--context` (invalid for podman) or DOCKER_HOST on verify/delete.
+func TestDockerCommitCmdSkipsContextForPodman(t *testing.T) {
+	var rec checkpointRecord
+	rec.Native.Runtime = "podman"
+	rec.Native.DockerContext = "some-ctx"
+	cmd := dockerCommitCmd(context.Background(), rec, Config{}, "image", "inspect", "img")
+	if filepath.Base(cmd.Args[0]) != "podman" {
+		t.Fatalf("expected podman runtime, got %v", cmd.Args)
+	}
+	for _, a := range cmd.Args {
+		if a == "--context" {
+			t.Fatalf("podman checkpoint must not replay --context, got args %v", cmd.Args)
+		}
+	}
+	if cmd.Env != nil {
+		t.Fatalf("podman checkpoint must not pin DOCKER_HOST, got env %v", cmd.Env)
+	}
+}
+
 // TestDockerCommitEffectiveScopePrefersContextOverHost covers the round-7 finding:
 // the recorded scope must preserve Docker context precedence, so when a named
 // context is active it is recorded (not the host) even if DOCKER_HOST is also set.

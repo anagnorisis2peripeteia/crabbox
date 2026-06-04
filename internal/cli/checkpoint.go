@@ -1647,6 +1647,23 @@ func dockerCommitRecordRuntime(record checkpointRecord, cfg Config) string {
 	return firstNonBlank(record.Native.Runtime, dockerCommitRuntime(cfg))
 }
 
+// isDockerCommitDockerRuntime reports whether the configured runtime is Docker
+// itself. Docker context (`--context` / DOCKER_CONTEXT) and DOCKER_HOST are
+// Docker-specific; other runtimes (podman, nerdctl, ...) manage their own daemon
+// connection, so capturing or replaying Docker daemon scope for them is
+// meaningless and would break verify/delete (e.g. `podman --context` is invalid).
+func isDockerCommitDockerRuntime(runtime string) bool {
+	r := strings.ToLower(strings.TrimSpace(runtime))
+	if r == "" {
+		return true
+	}
+	if i := strings.LastIndexAny(r, `/\`); i >= 0 {
+		r = r[i+1:]
+	}
+	r = strings.TrimSuffix(r, ".exe")
+	return r == "docker"
+}
+
 // dockerCommitContext captures the Docker CLI context actually in effect when a
 // docker-commit checkpoint is created, so verify/delete can replay it later even
 // if the ambient context selection changes. It prefers an explicit DOCKER_CONTEXT
@@ -1673,6 +1690,11 @@ func dockerCommitContext(ctx context.Context, cfg Config) string {
 // even if a context is selected later. Recording just one value keeps replay
 // unambiguous.
 func dockerCommitEffectiveScope(ctx context.Context, cfg Config) (host, contextName string) {
+	if !isDockerCommitDockerRuntime(dockerCommitRuntime(cfg)) {
+		// Non-Docker runtimes manage their own daemon connection; Docker context
+		// and DOCKER_HOST do not apply, so record no daemon scope.
+		return "", ""
+	}
 	if c := strings.TrimSpace(os.Getenv("DOCKER_CONTEXT")); c != "" {
 		return "", c
 	}
@@ -1690,13 +1712,20 @@ func dockerCommitEffectiveScope(ctx context.Context, cfg Config) (host, contextN
 // DOCKER_HOST and scrubs any later ambient DOCKER_CONTEXT, which the Docker CLI
 // documents as overriding DOCKER_HOST.
 func dockerCommitCmd(ctx context.Context, record checkpointRecord, cfg Config, args ...string) *exec.Cmd {
+	runtime := dockerCommitRecordRuntime(record, cfg)
 	host := strings.TrimSpace(record.Native.DockerHost)
 	contextName := strings.TrimSpace(record.Native.DockerContext)
+	if !isDockerCommitDockerRuntime(runtime) {
+		// Never replay Docker context/host against a non-Docker runtime (e.g. a
+		// `--context` flag is invalid for podman); fall back to the ambient
+		// selection the runtime understands.
+		host, contextName = "", ""
+	}
 	full := args
 	if contextName != "" {
 		full = append([]string{"--context", contextName}, args...)
 	}
-	cmd := exec.CommandContext(ctx, dockerCommitRecordRuntime(record, cfg), full...)
+	cmd := exec.CommandContext(ctx, runtime, full...)
 	if contextName == "" && host != "" {
 		cmd.Env = dockerEnvWithPinnedHost(host)
 	}
