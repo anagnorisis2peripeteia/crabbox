@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -726,14 +727,20 @@ func TestDockerCommitEffectiveScopeFallsBackToHost(t *testing.T) {
 // still record a scope (the active context, "default") so a context selected
 // later cannot hijack verify/delete.
 func TestDockerCommitEffectiveScopeRecordsDefaultContext(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("requires the docker CLI to resolve the active context via `docker context show`")
+	}
 	t.Setenv("DOCKER_CONTEXT", "")
 	t.Setenv("DOCKER_HOST", "")
 	host, contextName := dockerCommitEffectiveScope(context.Background(), Config{})
 	if host != "" {
-		t.Fatalf("host=%q, want empty on the default context", host)
+		t.Fatalf("host=%q, want empty on the active context", host)
 	}
-	if contextName != "default" {
-		t.Fatalf("contextName=%q, want the active context recorded (default), not dropped", contextName)
+	// The active context name varies by host (often "default"); the round-9 fix is
+	// that it is recorded at all rather than dropped, so a context selected later
+	// cannot hijack verify/delete.
+	if contextName == "" {
+		t.Fatal("active Docker context must be recorded, not dropped")
 	}
 }
 
