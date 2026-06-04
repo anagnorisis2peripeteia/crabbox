@@ -51,7 +51,7 @@ func (Provider) NativeCheckpointCapability(req core.NativeCheckpointRequest) (co
 	if req.Server.CloudID == "" {
 		return core.NativeCheckpointCapability{}, false
 	}
-	if req.Config.DockerSocket {
+	if req.Config.LocalContainer.DockerSocket {
 		return core.NativeCheckpointCapability{}, false
 	}
 	return core.NativeCheckpointCapability{Kind: core.CheckpointKindDockerCommit, Direct: true}, true

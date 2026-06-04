@@ -597,13 +597,14 @@ func TestCheckpointCreateModeParallelsRejectsImageStrategy(t *testing.T) {
 	}
 }
 
-func TestCheckpointCreateModeLocalContainerUsesDockerCommit(t *testing.T) {
+func TestCheckpointCreateModeLocalContainerNativeUsesDockerCommit(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Provider = "local-container"
 	server := Server{Provider: "local-container", CloudID: "abc123"}
 	target := SSHTarget{TargetOS: targetLinux}
-	if got := checkpointCreateMode("auto", "", cfg, server, target, false); got != checkpointKindDockerCommit {
-		t.Fatalf("auto mode=%q, want %q", got, checkpointKindDockerCommit)
+	// auto keeps the existing workspace-archive default; docker-commit is opt-in via --mode native.
+	if got := checkpointCreateMode("auto", "", cfg, server, target, false); got != checkpointKindArchive {
+		t.Fatalf("auto mode=%q, want %q", got, checkpointKindArchive)
 	}
 	if got := checkpointCreateMode("native", "", cfg, server, target, false); got != checkpointKindDockerCommit {
 		t.Fatalf("native mode=%q, want %q", got, checkpointKindDockerCommit)
