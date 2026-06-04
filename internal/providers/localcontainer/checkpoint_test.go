@@ -29,3 +29,13 @@ func TestNativeCheckpointCapabilityRequiresCloudID(t *testing.T) {
 		t.Fatal("expected capability to be unsupported without CloudID")
 	}
 }
+
+func TestNativeCheckpointCapabilitySkipsDockerSocket(t *testing.T) {
+	_, ok := Provider{}.NativeCheckpointCapability(core.NativeCheckpointRequest{
+		Server: core.Server{CloudID: "abc123"},
+		Config: core.Config{DockerSocket: true},
+	})
+	if ok {
+		t.Fatal("expected capability to be unsupported with docker-socket")
+	}
+}

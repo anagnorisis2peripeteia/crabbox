@@ -24,7 +24,7 @@ func (Provider) Spec() core.ProviderSpec {
 		Family:      "container",
 		Kind:        core.ProviderKindSSHLease,
 		Targets:     []core.TargetSpec{{OS: core.TargetLinux}},
-		Features:    core.FeatureSet{core.FeatureSSH, core.FeatureCrabboxSync, core.FeatureCleanup, core.FeatureDesktop, core.FeatureBrowser, core.FeatureCacheVolume, core.FeatureCheckpoint, core.FeatureFork},
+		Features:    core.FeatureSet{core.FeatureSSH, core.FeatureCrabboxSync, core.FeatureCleanup, core.FeatureDesktop, core.FeatureBrowser, core.FeatureCacheVolume, core.FeatureCheckpoint},
 		Coordinator: core.CoordinatorNever,
 	}
 }
@@ -49,6 +49,9 @@ func (p Provider) Configure(cfg core.Config, rt core.Runtime) (core.Backend, err
 
 func (Provider) NativeCheckpointCapability(req core.NativeCheckpointRequest) (core.NativeCheckpointCapability, bool) {
 	if req.Server.CloudID == "" {
+		return core.NativeCheckpointCapability{}, false
+	}
+	if req.Config.DockerSocket {
 		return core.NativeCheckpointCapability{}, false
 	}
 	return core.NativeCheckpointCapability{Kind: core.CheckpointKindDockerCommit, Direct: true}, true
