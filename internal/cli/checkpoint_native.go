@@ -153,6 +153,19 @@ func (d directParallelsCheckpointDriver) Create(ctx context.Context, req checkpo
 	}, nil
 }
 
+// dockerCommitImageName builds the tag for a docker-commit checkpoint image,
+// digest-suffixed for per-checkpoint uniqueness. Docker repository names must be
+// lowercase, so the whole tag is lowercased — an uppercase --name would otherwise
+// make `docker tag` fail after the commit already created the image, leaving a
+// dangling untagged image.
+func dockerCommitImageName(name, imageID string) string {
+	shortID := strings.TrimPrefix(imageID, "sha256:")
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+	return strings.ToLower("crabbox-checkpoint-" + safeCaptureName(name) + "-" + shortID)
+}
+
 type directDockerCommitCheckpointDriver struct{}
 
 func (directDockerCommitCheckpointDriver) Create(ctx context.Context, req checkpointNativeCreateRequest) (CoordinatorImage, error) {
@@ -177,11 +190,7 @@ func (directDockerCommitCheckpointDriver) Create(ctx context.Context, req checkp
 	imageID := strings.TrimSpace(string(out))
 	// Tag for readability with a name unique to this checkpoint (digest-suffixed),
 	// so reusing a friendly --name never retags an existing checkpoint image.
-	shortID := strings.TrimPrefix(imageID, "sha256:")
-	if len(shortID) > 12 {
-		shortID = shortID[:12]
-	}
-	imageName := "crabbox-checkpoint-" + safeCaptureName(name) + "-" + shortID
+	imageName := dockerCommitImageName(name, imageID)
 	if tagOut, err := exec.CommandContext(ctx, runtime, "tag", imageID, imageName).CombinedOutput(); err != nil {
 		return CoordinatorImage{}, exit(7, "docker tag %s: %v: %s", imageID, err, trimFailureDetail(string(tagOut)))
 	}

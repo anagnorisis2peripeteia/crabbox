@@ -694,6 +694,22 @@ func TestDockerCommitCmdPinsDaemonScope(t *testing.T) {
 	}
 }
 
+// TestDockerCommitImageNameIsLowercase covers the finding that an uppercase
+// --name would produce an invalid (uppercase) Docker repository name and break
+// `docker tag` after the commit already created the image.
+func TestDockerCommitImageNameIsLowercase(t *testing.T) {
+	got := dockerCommitImageName("MyApp-PROD", "sha256:ABCDEF0123456789")
+	if got != strings.ToLower(got) {
+		t.Fatalf("image name must be lowercase, got %q", got)
+	}
+	if !strings.HasPrefix(got, "crabbox-checkpoint-") {
+		t.Fatalf("unexpected image name prefix: %q", got)
+	}
+	if !strings.HasSuffix(got, "abcdef012345") {
+		t.Fatalf("image name must keep the lowercased digest suffix, got %q", got)
+	}
+}
+
 func TestDockerCommitContextPrefersExplicitEnv(t *testing.T) {
 	t.Setenv("DOCKER_CONTEXT", "captured-ctx")
 	if got := dockerCommitContext(context.Background(), Config{}); got != "captured-ctx" {
