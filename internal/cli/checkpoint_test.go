@@ -662,6 +662,61 @@ func TestDockerCommitContextPrefersExplicitEnv(t *testing.T) {
 	}
 }
 
+// TestDockerCommitEffectiveScopePrefersHostOverContext covers the round-6 finding:
+// with both DOCKER_HOST and DOCKER_CONTEXT set, only the host (which the Docker CLI
+// honours) is recorded, so replay cannot resolve to a different daemon.
+func TestDockerCommitEffectiveScopePrefersHostOverContext(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "tcp://10.0.0.5:2376")
+	t.Setenv("DOCKER_CONTEXT", "ambient-ctx")
+	host, contextName := dockerCommitEffectiveScope(context.Background(), Config{})
+	if host != "tcp://10.0.0.5:2376" {
+		t.Fatalf("host=%q, want the pinned DOCKER_HOST", host)
+	}
+	if contextName != "" {
+		t.Fatalf("contextName=%q, want empty: a pinned host is the sole effective scope", contextName)
+	}
+}
+
+// TestDockerCommitEffectiveScopeFallsBackToContext: with no host, the active
+// Docker context is the recorded scope.
+func TestDockerCommitEffectiveScopeFallsBackToContext(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "ctx-only")
+	host, contextName := dockerCommitEffectiveScope(context.Background(), Config{})
+	if host != "" || contextName != "ctx-only" {
+		t.Fatalf("got host=%q context=%q, want host empty + context ctx-only", host, contextName)
+	}
+}
+
+// TestDockerCommitCmdHostOverridesAmbientContext is the regression for the
+// round-6 finding: when a checkpoint recorded a DOCKER_HOST, verify/delete must
+// pin that host and not let a stray ambient DOCKER_CONTEXT select another daemon.
+func TestDockerCommitCmdHostOverridesAmbientContext(t *testing.T) {
+	t.Setenv("DOCKER_CONTEXT", "ambient-ctx")
+	var rec checkpointRecord
+	rec.Native.DockerHost = "tcp://10.0.0.5:2376"
+	cmd := dockerCommitCmd(context.Background(), rec, Config{}, "image", "inspect", "img")
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "DOCKER_CONTEXT=") {
+			t.Fatalf("ambient DOCKER_CONTEXT must be cleared when pinning DOCKER_HOST, got %q in env", e)
+		}
+	}
+	found := false
+	for _, e := range cmd.Env {
+		if e == "DOCKER_HOST=tcp://10.0.0.5:2376" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("recorded DOCKER_HOST not applied: %v", cmd.Env)
+	}
+	for _, a := range cmd.Args {
+		if a == "--context" {
+			t.Fatalf("pinned host must not add --context, got args %v", cmd.Args)
+		}
+	}
+}
+
 // TestDockerCommitDaemonScopeSurvivesAmbientChange is the regression for the
 // round-5 finding: a checkpoint created under one Docker context must verify and
 // delete against that same context even after the ambient DOCKER_CONTEXT changes.
