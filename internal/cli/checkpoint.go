@@ -652,7 +652,7 @@ func (a App) checkpointRestore(ctx context.Context, args []string) error {
 				return nil
 			}
 			if record.Kind == checkpointKindDockerCommit {
-				return exit(2, "checkpoint %s is a docker-commit image; restore is not supported for docker-commit checkpoints — verify or delete it with crabbox checkpoint verify/delete %s", record.ID, record.ID)
+				return exit(2, "checkpoint %s is a docker-commit image; restore is not supported for docker-commit checkpoints — verify it with crabbox checkpoint inspect %s --verify or remove it with crabbox checkpoint delete %s", record.ID, record.ID, record.ID)
 			}
 			return exit(2, "checkpoint %s is a VM image; use crabbox checkpoint fork %s to create a lease from it", record.ID, record.ID)
 		}
@@ -1195,10 +1195,20 @@ func (a App) verifyCheckpointRecord(ctx context.Context, store checkpointStore, 
 				return audit, nil
 			}
 			target := firstNonBlank(providerID, record.Native.Name)
-			cmd := dockerCommitCmd(ctx, record, cfg, "image", "inspect", target)
-			if err := cmd.Run(); err != nil {
-				audit.ProviderState = "missing"
-				audit.NextAction = "delete_local"
+			out, err := dockerCommitCmd(ctx, record, cfg, "image", "inspect", target).CombinedOutput()
+			if err != nil {
+				// Only a confirmed "no such image" means the committed image is gone
+				// and the local record can be pruned. A runtime/daemon/context
+				// failure is inconclusive — reporting it as "missing" would steer
+				// users into deleting valid checkpoint metadata.
+				if dockerImageInspectReportsMissing(string(out)) {
+					audit.ProviderState = "missing"
+					audit.NextAction = "delete_local"
+				} else {
+					audit.ProviderState = "unknown"
+					audit.NextAction = "check_runtime"
+					audit.Error = firstNonBlank(strings.TrimSpace(string(out)), err.Error())
+				}
 				return audit, nil
 			}
 			audit.ProviderState = "available"
@@ -1645,6 +1655,18 @@ func dockerCommitRuntime(cfg Config) string {
 // verify/delete target the same daemon the checkpoint was created against.
 func dockerCommitRecordRuntime(record checkpointRecord, cfg Config) string {
 	return firstNonBlank(record.Native.Runtime, dockerCommitRuntime(cfg))
+}
+
+// dockerImageInspectReportsMissing reports whether an `image inspect` failure
+// output confirms the image is genuinely absent (across docker/podman/nerdctl
+// wording), as opposed to a runtime/daemon/context failure. Only a confirmed
+// missing image should drive a delete_local recommendation.
+func dockerImageInspectReportsMissing(output string) bool {
+	s := strings.ToLower(output)
+	return strings.Contains(s, "no such image") ||
+		strings.Contains(s, "no such object") ||
+		strings.Contains(s, "image not found") ||
+		strings.Contains(s, "reference does not exist")
 }
 
 // isDockerCommitDockerRuntime reports whether the configured runtime is Docker

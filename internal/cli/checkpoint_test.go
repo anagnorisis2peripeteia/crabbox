@@ -200,8 +200,13 @@ func TestCheckpointRestoreDockerCommitDoesNotPointAtFork(t *testing.T) {
 	if strings.Contains(msg, "VM image") {
 		t.Fatalf("docker-commit image must not be called a VM image, got %q", msg)
 	}
-	if !strings.Contains(msg, "verify") || !strings.Contains(msg, "delete") {
-		t.Fatalf("docker-commit restore guidance should mention verify/delete, got %q", msg)
+	// Must point at commands that actually exist: `inspect <id> --verify` and
+	// `delete <id>` (there is no `checkpoint verify` subcommand).
+	if !strings.Contains(msg, "checkpoint inspect") || !strings.Contains(msg, "--verify") {
+		t.Fatalf("guidance should point at `checkpoint inspect <id> --verify`, got %q", msg)
+	}
+	if !strings.Contains(msg, "checkpoint delete") {
+		t.Fatalf("guidance should point at `checkpoint delete <id>`, got %q", msg)
 	}
 }
 
@@ -693,6 +698,34 @@ func TestDockerCommitContextPrefersExplicitEnv(t *testing.T) {
 	t.Setenv("DOCKER_CONTEXT", "captured-ctx")
 	if got := dockerCommitContext(context.Background(), Config{}); got != "captured-ctx" {
 		t.Fatalf("dockerCommitContext = %q, want captured-ctx (must capture the real context, not a lease label)", got)
+	}
+}
+
+// TestDockerImageInspectReportsMissing is the round-12 regression: only a
+// confirmed missing image (across docker/podman/nerdctl wording) should classify
+// as missing; runtime/daemon/context failures must not, so verify never tells
+// users to delete valid checkpoint metadata when the daemon is merely unreachable.
+func TestDockerImageInspectReportsMissing(t *testing.T) {
+	missing := []string{
+		"Error: No such image: crabbox-checkpoint-x",
+		"Error response from daemon: no such object: crabbox-checkpoint-x",
+		"Error: crabbox-checkpoint-x: image not found",
+	}
+	for _, s := range missing {
+		if !dockerImageInspectReportsMissing(s) {
+			t.Fatalf("expected %q to classify as missing", s)
+		}
+	}
+	notMissing := []string{
+		"Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+		"error during connect: dial tcp: connection refused",
+		"permission denied while trying to connect to the Docker daemon socket",
+		"context \"remote-ctx\" does not exist",
+	}
+	for _, s := range notMissing {
+		if dockerImageInspectReportsMissing(s) {
+			t.Fatalf("expected %q to NOT classify as missing (runtime/daemon/context failure)", s)
+		}
 	}
 }
 
