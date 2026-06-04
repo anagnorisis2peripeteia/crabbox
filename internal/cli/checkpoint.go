@@ -18,17 +18,17 @@ import (
 )
 
 const (
-	checkpointIDPrefix      = "chk_"
-	checkpointMetaFile      = "checkpoint.json"
-	checkpointArchive       = "workspace.tar.gz"
-	checkpointKindRecipe    = "recipe"
-	checkpointKindArchive   = "workspace-archive"
-	checkpointKindAWSAMI    = "aws-ami"
-	checkpointKindAWSEBS    = "aws-ebs-snapshot"
-	checkpointKindAzure     = "azure-managed-image"
-	checkpointKindAzureOS   = "azure-os-disk-snapshot"
-	checkpointKindGCP       = "gcp-machine-image"
-	checkpointKindGCPDisk   = "gcp-disk-snapshot"
+	checkpointIDPrefix         = "chk_"
+	checkpointMetaFile         = "checkpoint.json"
+	checkpointArchive          = "workspace.tar.gz"
+	checkpointKindRecipe       = "recipe"
+	checkpointKindArchive      = "workspace-archive"
+	checkpointKindAWSAMI       = "aws-ami"
+	checkpointKindAWSEBS       = "aws-ebs-snapshot"
+	checkpointKindAzure        = "azure-managed-image"
+	checkpointKindAzureOS      = "azure-os-disk-snapshot"
+	checkpointKindGCP          = "gcp-machine-image"
+	checkpointKindGCPDisk      = "gcp-disk-snapshot"
 	checkpointKindParallels    = "parallels-snapshot"
 	checkpointKindDockerCommit = "docker-commit"
 
@@ -67,6 +67,7 @@ type checkpointRecord struct {
 		Direct      bool     `json:"direct,omitempty"`
 		Strategy    string   `json:"strategy,omitempty"`
 		NoReboot    bool     `json:"noReboot,omitempty"`
+		Runtime     string   `json:"runtime,omitempty"`
 	} `json:"native,omitempty"`
 	Repo struct {
 		Root      string `json:"root,omitempty"`
@@ -198,6 +199,11 @@ func (a App) checkpointCreate(ctx context.Context, args []string) (err error) {
 		image, err := a.createNativeCheckpoint(ctx, cfg, server, target, leaseID, record.Name, repo.Name, checkpointStrategyForKind(createKind), *noReboot, *wait, *waitTimeout)
 		if image.ID != "" {
 			applyNativeImageCheckpointRecord(&record, image, *noReboot)
+			if createKind == checkpointKindDockerCommit {
+				// Record the runtime/context used at create time so verify/delete
+				// act on the same daemon (docker/podman/nerdctl/context).
+				record.Native.Runtime = dockerCommitRuntime(cfg)
+			}
 		}
 		if err != nil {
 			if record.Native.ImageID != "" {
@@ -975,7 +981,7 @@ func deleteCheckpoint(ctx context.Context, store checkpointStore, id string, loc
 				return err
 			}
 			target := firstNonBlank(providerID, record.Native.Name)
-			cmd := exec.CommandContext(ctx, dockerCommitRuntime(cfg), "rmi", "-f", target)
+			cmd := exec.CommandContext(ctx, dockerCommitRecordRuntime(record, cfg), "rmi", "-f", target)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				return exit(7, "docker rmi %s: %v: %s", target, err, trimFailureDetail(string(out)))
 			}
@@ -1182,7 +1188,7 @@ func (a App) verifyCheckpointRecord(ctx context.Context, store checkpointStore, 
 				return audit, nil
 			}
 			target := firstNonBlank(providerID, record.Native.Name)
-			cmd := exec.CommandContext(ctx, dockerCommitRuntime(cfg), "image", "inspect", target)
+			cmd := exec.CommandContext(ctx, dockerCommitRecordRuntime(record, cfg), "image", "inspect", target)
 			if err := cmd.Run(); err != nil {
 				audit.ProviderState = "missing"
 				audit.NextAction = "delete_local"
@@ -1626,4 +1632,10 @@ func remoteRelocateNativeCheckpointWorkdirCommand(sourceWorkdir, targetWorkdir s
 
 func dockerCommitRuntime(cfg Config) string {
 	return firstNonBlank(cfg.LocalContainer.Runtime, "docker")
+}
+
+// dockerCommitRecordRuntime prefers the runtime recorded with the checkpoint so
+// verify/delete target the same daemon the checkpoint was created against.
+func dockerCommitRecordRuntime(record checkpointRecord, cfg Config) string {
+	return firstNonBlank(record.Native.Runtime, dockerCommitRuntime(cfg))
 }

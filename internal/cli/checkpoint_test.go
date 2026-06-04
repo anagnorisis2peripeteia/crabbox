@@ -621,6 +621,18 @@ func TestCheckpointCreateModeLocalContainerRequiresCloudID(t *testing.T) {
 	}
 }
 
+func TestDockerCommitRecordRuntimePrefersRecordedRuntime(t *testing.T) {
+	var rec checkpointRecord
+	rec.Native.Runtime = "podman"
+	if got := dockerCommitRecordRuntime(rec, Config{}); got != "podman" {
+		t.Fatalf("recorded runtime: got %q, want podman", got)
+	}
+	var none checkpointRecord
+	if got := dockerCommitRecordRuntime(none, Config{}); got != "docker" {
+		t.Fatalf("fallback runtime: got %q, want docker", got)
+	}
+}
+
 func TestDirectAWSCheckpointConfigUsesDirectMarker(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "crabbox.yaml")
 	if err := os.WriteFile(cfgPath, []byte("provider: aws\naws:\n  region: us-east-1\n"), 0o600); err != nil {
