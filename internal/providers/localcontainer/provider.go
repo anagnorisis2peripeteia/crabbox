@@ -54,6 +54,11 @@ func (Provider) NativeCheckpointCapability(req core.NativeCheckpointRequest) (co
 	if req.Config.LocalContainer.DockerSocket || leaseHasDockerSocket(req.Server) {
 		return core.NativeCheckpointCapability{}, false
 	}
+	// docker-commit is a native/auto-mode checkpoint, not an image-mode one;
+	// reject the capability when image strategy is explicitly requested.
+	if core.IsImageCheckpointStrategy(req.Strategy) {
+		return core.NativeCheckpointCapability{}, false
+	}
 	return core.NativeCheckpointCapability{Kind: core.CheckpointKindDockerCommit, Direct: true}, true
 }
 

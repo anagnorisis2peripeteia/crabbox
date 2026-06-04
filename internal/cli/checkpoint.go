@@ -1413,6 +1413,14 @@ func normalizeCheckpointStrategy(strategy string) string {
 	}
 }
 
+// IsImageCheckpointStrategy reports whether a requested checkpoint strategy
+// resolves to the image (machine-image/AMI) mode. Exported so providers can
+// reject native primitives that are not image-mode checkpoints (e.g. local
+// container docker-commit, which is a native/auto-mode checkpoint).
+func IsImageCheckpointStrategy(strategy string) bool {
+	return normalizeCheckpointStrategy(strategy) == checkpointStrategyImage
+}
+
 func validCheckpointStrategy(strategy string) bool {
 	switch strings.ToLower(strings.TrimSpace(strategy)) {
 	case "", checkpointStrategyAuto, checkpointStrategyDiskSnapshot, checkpointStrategyImage, "snapshot", "disk", "ami", "machine-image", "managed-image", "disk_snapshot":

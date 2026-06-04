@@ -30,6 +30,16 @@ func TestNativeCheckpointCapabilityRequiresCloudID(t *testing.T) {
 	}
 }
 
+func TestNativeCheckpointCapabilitySkipsImageStrategy(t *testing.T) {
+	_, ok := Provider{}.NativeCheckpointCapability(core.NativeCheckpointRequest{
+		Server:   core.Server{CloudID: "abc123"},
+		Strategy: "image",
+	})
+	if ok {
+		t.Fatal("expected capability to be unsupported with strategy=image (docker-commit is native/auto-mode)")
+	}
+}
+
 func TestNativeCheckpointCapabilitySkipsDockerSocket(t *testing.T) {
 	_, ok := Provider{}.NativeCheckpointCapability(core.NativeCheckpointRequest{
 		Server: core.Server{CloudID: "abc123"},
