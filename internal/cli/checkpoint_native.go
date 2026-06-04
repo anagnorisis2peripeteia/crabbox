@@ -164,14 +164,24 @@ func (directDockerCommitCheckpointDriver) Create(ctx context.Context, req checkp
 	if name == "" {
 		name = defaultNativeImageName(req.LeaseID, req.RepoName)
 	}
-	imageName := "crabbox-checkpoint-" + safeCaptureName(name)
 	runtime := firstNonBlank(req.Cfg.LocalContainer.Runtime, "docker")
-	cmd := exec.CommandContext(ctx, runtime, "commit", containerID, imageName)
-	out, err := cmd.CombinedOutput()
+	// Commit untagged first: the image digest is the immutable per-checkpoint
+	// identity recorded for verify/delete/fork.
+	out, err := exec.CommandContext(ctx, runtime, "commit", containerID).CombinedOutput()
 	if err != nil {
 		return CoordinatorImage{}, exit(7, "docker commit %s: %v: %s", containerID, err, trimFailureDetail(string(out)))
 	}
 	imageID := strings.TrimSpace(string(out))
+	// Tag for readability with a name unique to this checkpoint (digest-suffixed),
+	// so reusing a friendly --name never retags an existing checkpoint image.
+	shortID := strings.TrimPrefix(imageID, "sha256:")
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+	imageName := "crabbox-checkpoint-" + safeCaptureName(name) + "-" + shortID
+	if tagOut, err := exec.CommandContext(ctx, runtime, "tag", imageID, imageName).CombinedOutput(); err != nil {
+		return CoordinatorImage{}, exit(7, "docker tag %s: %v: %s", imageID, err, trimFailureDetail(string(tagOut)))
+	}
 	return CoordinatorImage{
 		ID:       imageID,
 		Name:     imageName,

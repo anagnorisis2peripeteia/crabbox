@@ -974,8 +974,8 @@ func deleteCheckpoint(ctx context.Context, store checkpointStore, id string, loc
 			if err != nil {
 				return err
 			}
-			target := firstNonBlank(record.Native.Name, providerID)
-			cmd := exec.CommandContext(ctx, dockerCommitRuntime(cfg), "rmi", target)
+			target := firstNonBlank(providerID, record.Native.Name)
+			cmd := exec.CommandContext(ctx, dockerCommitRuntime(cfg), "rmi", "-f", target)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				return exit(7, "docker rmi %s: %v: %s", target, err, trimFailureDetail(string(out)))
 			}
@@ -1181,7 +1181,7 @@ func (a App) verifyCheckpointRecord(ctx context.Context, store checkpointStore, 
 				audit.Error = err.Error()
 				return audit, nil
 			}
-			target := firstNonBlank(record.Native.Name, providerID)
+			target := firstNonBlank(providerID, record.Native.Name)
 			cmd := exec.CommandContext(ctx, dockerCommitRuntime(cfg), "image", "inspect", target)
 			if err := cmd.Run(); err != nil {
 				audit.ProviderState = "missing"

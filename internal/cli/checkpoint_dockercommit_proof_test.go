@@ -49,6 +49,21 @@ func TestDockerCommitCheckpointLifecycleProof(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command(runtime, "rmi", "-f", img.Name).Run() })
 	t.Logf("CREATE: image=%s id=%s state=%s kind=%s direct=%v", img.Name, short(img.ID), img.State, img.Kind, img.Direct)
 
+	// DUP-NAME coverage — a second checkpoint with the same --name must not
+	// retag the first; identity is the per-image digest.
+	img2, err := directDockerCommitCheckpointDriver{}.Create(context.Background(), checkpointNativeCreateRequest{
+		Server: Server{CloudID: containerID},
+		Name:   "proof",
+	})
+	if err != nil {
+		t.Fatalf("Create #2: %v", err)
+	}
+	t.Cleanup(func() { _ = exec.Command(runtime, "rmi", "-f", img2.Name).Run() })
+	if img2.ID == img.ID || img2.Name == img.Name {
+		t.Fatalf("duplicate --name reused identity: #1=%s/%s #2=%s/%s", img.Name, short(img.ID), img2.Name, short(img2.ID))
+	}
+	t.Logf("DUP-NAME: second checkpoint is distinct -> image=%s id=%s", img2.Name, short(img2.ID))
+
 	// VERIFY — same command checkpoint verify uses for docker-commit records.
 	insp, err := exec.Command(runtime, "image", "inspect", img.Name, "--format", "{{.Id}}").CombinedOutput()
 	if err != nil {
