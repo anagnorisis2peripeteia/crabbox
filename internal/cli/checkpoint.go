@@ -207,7 +207,7 @@ func (a App) checkpointCreate(ctx context.Context, args []string) (err error) {
 				// even if the ambient Docker context changes later.
 				record.Native.Runtime = dockerCommitRuntime(cfg)
 				record.Native.DockerHost = strings.TrimSpace(os.Getenv("DOCKER_HOST"))
-				record.Native.DockerContext = strings.TrimSpace(server.Labels["runtime_context"])
+				record.Native.DockerContext = dockerCommitContext(ctx, cfg)
 			}
 		}
 		if err != nil {
@@ -1643,6 +1643,24 @@ func dockerCommitRuntime(cfg Config) string {
 // verify/delete target the same daemon the checkpoint was created against.
 func dockerCommitRecordRuntime(record checkpointRecord, cfg Config) string {
 	return firstNonBlank(record.Native.Runtime, dockerCommitRuntime(cfg))
+}
+
+// dockerCommitContext captures the Docker CLI context actually in effect when a
+// docker-commit checkpoint is created, so verify/delete can replay it later even
+// if the ambient context selection changes. It prefers an explicit DOCKER_CONTEXT
+// and otherwise asks the runtime for its current context (`docker context show`).
+// Returns "" when the context cannot be determined; when DOCKER_HOST overrides the
+// selection the runtime reports "default", which dockerCommitCmd ignores in favour
+// of the recorded host.
+func dockerCommitContext(ctx context.Context, cfg Config) string {
+	if env := strings.TrimSpace(os.Getenv("DOCKER_CONTEXT")); env != "" {
+		return env
+	}
+	out, err := exec.CommandContext(ctx, dockerCommitRuntime(cfg), "context", "show").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // dockerCommitCmd builds a docker-commit runtime command pinned to the daemon

@@ -655,6 +655,31 @@ func TestDockerCommitCmdPinsDaemonScope(t *testing.T) {
 	}
 }
 
+func TestDockerCommitContextPrefersExplicitEnv(t *testing.T) {
+	t.Setenv("DOCKER_CONTEXT", "captured-ctx")
+	if got := dockerCommitContext(context.Background(), Config{}); got != "captured-ctx" {
+		t.Fatalf("dockerCommitContext = %q, want captured-ctx (must capture the real context, not a lease label)", got)
+	}
+}
+
+// TestDockerCommitDaemonScopeSurvivesAmbientChange is the regression for the
+// round-5 finding: a checkpoint created under one Docker context must verify and
+// delete against that same context even after the ambient DOCKER_CONTEXT changes.
+func TestDockerCommitDaemonScopeSurvivesAmbientChange(t *testing.T) {
+	t.Setenv("DOCKER_CONTEXT", "create-time-ctx")
+	var rec checkpointRecord
+	rec.Native.DockerContext = dockerCommitContext(context.Background(), Config{})
+	if rec.Native.DockerContext != "create-time-ctx" {
+		t.Fatalf("recorded context = %q, want create-time-ctx", rec.Native.DockerContext)
+	}
+	// Ambient context changes after create.
+	t.Setenv("DOCKER_CONTEXT", "some-other-ctx")
+	cmd := dockerCommitCmd(context.Background(), rec, Config{}, "image", "inspect", "img")
+	if len(cmd.Args) < 3 || cmd.Args[1] != "--context" || cmd.Args[2] != "create-time-ctx" {
+		t.Fatalf("verify/delete must replay the create-time context, got args %v", cmd.Args)
+	}
+}
+
 func TestDirectAWSCheckpointConfigUsesDirectMarker(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "crabbox.yaml")
 	if err := os.WriteFile(cfgPath, []byte("provider: aws\naws:\n  region: us-east-1\n"), 0o600); err != nil {
