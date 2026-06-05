@@ -123,6 +123,8 @@ type Config struct {
 	appleContainerImageExplicit bool
 	Multipass                   MultipassConfig
 	multipassImageExplicit      bool
+	Tart                        TartConfig
+	tartImageExplicit           bool
 	Tailscale                   TailscaleConfig
 	Static                      StaticConfig
 	Results                     ResultsConfig
@@ -447,6 +449,15 @@ type MultipassConfig struct {
 	Memory        string
 	Disk          string
 	LaunchTimeout time.Duration
+}
+
+type TartConfig struct {
+	Image    string
+	User     string
+	WorkRoot string
+	CPUs     int
+	Memory   int
+	Disk     int
 }
 
 type StaticConfig struct {
@@ -844,6 +855,10 @@ func MarkMultipassImageExplicit(cfg *Config) {
 	cfg.multipassImageExplicit = true
 }
 
+func MarkTartImageExplicit(cfg *Config) {
+	cfg.tartImageExplicit = true
+}
+
 func baseConfig() Config {
 	home, _ := os.UserHomeDir()
 	sshKey := ""
@@ -1026,6 +1041,14 @@ func baseConfig() Config {
 			Disk:          "30G",
 			LaunchTimeout: 20 * time.Minute,
 		},
+		Tart: TartConfig{
+			Image:    "ghcr.io/cirruslabs/macos-sequoia-base:latest",
+			User:     "admin",
+			WorkRoot: "/Users/admin/crabbox",
+			CPUs:     4,
+			Memory:   8192,
+			Disk:     50,
+		},
 		Tailscale: TailscaleConfig{
 			Tags:             []string{"tag:crabbox"},
 			HostnameTemplate: "crabbox-{slug}",
@@ -1092,6 +1115,7 @@ type fileConfig struct {
 	LocalContainer       *fileLocalContainerConfig          `yaml:"localContainer,omitempty"`
 	AppleContainer       *fileAppleContainerConfig          `yaml:"appleContainer,omitempty"`
 	Multipass            *fileMultipassConfig               `yaml:"multipass,omitempty"`
+	Tart                 *fileTartConfig                    `yaml:"tart,omitempty"`
 	Tailscale            *fileTailscaleConfig               `yaml:"tailscale,omitempty"`
 	Static               *fileStaticConfig                  `yaml:"static,omitempty"`
 	Results              *fileResultsConfig                 `yaml:"results,omitempty"`
@@ -1474,6 +1498,15 @@ type fileMultipassConfig struct {
 	Memory        string `yaml:"memory,omitempty"`
 	Disk          string `yaml:"disk,omitempty"`
 	LaunchTimeout string `yaml:"launchTimeout,omitempty"`
+}
+
+type fileTartConfig struct {
+	Image    string `yaml:"image,omitempty"`
+	User     string `yaml:"user,omitempty"`
+	WorkRoot string `yaml:"workRoot,omitempty"`
+	CPUs     int    `yaml:"cpus,omitempty"`
+	Memory   int    `yaml:"memory,omitempty"`
+	Disk     int    `yaml:"disk,omitempty"`
 }
 
 type fileTailscaleConfig struct {
@@ -2572,6 +2605,27 @@ func applyFileConfig(cfg *Config, file fileConfig) error {
 			applyLeaseDuration(&cfg.Multipass.LaunchTimeout, file.Multipass.LaunchTimeout)
 		}
 	}
+	if file.Tart != nil {
+		if file.Tart.Image != "" {
+			cfg.Tart.Image = file.Tart.Image
+			cfg.tartImageExplicit = true
+		}
+		if file.Tart.User != "" {
+			cfg.Tart.User = file.Tart.User
+		}
+		if file.Tart.WorkRoot != "" {
+			cfg.Tart.WorkRoot = file.Tart.WorkRoot
+		}
+		if file.Tart.CPUs > 0 {
+			cfg.Tart.CPUs = file.Tart.CPUs
+		}
+		if file.Tart.Memory > 0 {
+			cfg.Tart.Memory = file.Tart.Memory
+		}
+		if file.Tart.Disk > 0 {
+			cfg.Tart.Disk = file.Tart.Disk
+		}
+	}
 	if file.Tailscale != nil {
 		if file.Tailscale.Enabled != nil {
 			cfg.Tailscale.Enabled = *file.Tailscale.Enabled
@@ -3282,6 +3336,15 @@ func applyEnv(cfg *Config) error {
 	if timeout := os.Getenv("CRABBOX_MULTIPASS_LAUNCH_TIMEOUT"); timeout != "" {
 		applyLeaseDuration(&cfg.Multipass.LaunchTimeout, timeout)
 	}
+	if image := os.Getenv("CRABBOX_TART_IMAGE"); image != "" {
+		cfg.Tart.Image = image
+		cfg.tartImageExplicit = true
+	}
+	cfg.Tart.User = getenv("CRABBOX_TART_USER", cfg.Tart.User)
+	cfg.Tart.WorkRoot = getenv("CRABBOX_TART_WORK_ROOT", cfg.Tart.WorkRoot)
+	cfg.Tart.CPUs = getenvInt("CRABBOX_TART_CPUS", cfg.Tart.CPUs)
+	cfg.Tart.Memory = getenvInt("CRABBOX_TART_MEMORY", cfg.Tart.Memory)
+	cfg.Tart.Disk = getenvInt("CRABBOX_TART_DISK", cfg.Tart.Disk)
 	if value, ok := getenvBool("CRABBOX_TAILSCALE"); ok {
 		cfg.Tailscale.Enabled = value
 	}
